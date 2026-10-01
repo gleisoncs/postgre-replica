@@ -1,0 +1,44 @@
+# LOCAL Citus cluster, for testing only.
+# WARNING: uses trust auth (no password). Do not use in production.
+x-citus: &citus
+  image: citusdata/citus:13.0
+  environment:
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: postgres
+    POSTGRES_HOST_AUTH_METHOD: trust
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U postgres"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+  networks: [citus]
+
+services:
+  coordinator:
+    <<: *citus
+    container_name: citus-coordinator
+    ports:
+      - "127.0.0.1:5433:5432"   # localhost only; 5433 because 5432 is often already in use
+    volumes:
+      - coord:/var/lib/postgresql/data
+      - ./sql:/sql:ro
+
+  worker1:
+    <<: *citus
+    container_name: citus-worker1
+    volumes:
+      - w1:/var/lib/postgresql/data
+
+  worker2:
+    <<: *citus
+    container_name: citus-worker2
+    volumes:
+      - w2:/var/lib/postgresql/data
+
+networks:
+  citus: {}
+
+volumes:
+  coord: {}
+  w1: {}
+  w2: {}

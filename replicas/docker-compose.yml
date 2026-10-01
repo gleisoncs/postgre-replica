@@ -1,0 +1,82 @@
+# OpenAI-style architecture, LOCAL, for testing only:
+# 1 primary (writes) + 2 replicas (reads) + 1 cascading replica + PgBouncer.
+# Hardcoded passwords for local testing only. In production: secrets + TLS.
+name: pg-replicas
+
+x-pg: &pg
+  image: postgres:17
+  environment:
+    POSTGRES_PASSWORD: postgres
+    REPL_PASSWORD: replpass
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -h localhost -U postgres"]
+    interval: 3s
+    timeout: 3s
+    retries: 40
+  networks: [pg]
+
+x-replica: &replica
+  <<: *pg
+  user: postgres
+  entrypoint: ["bash", "/scripts/replica-entrypoint.sh"]
+
+services:
+  primary:
+    <<: *pg
+    container_name: pg-primary
+    ports: ["127.0.0.1:5434:5432"]
+    volumes:
+      - primary:/var/lib/postgresql/data
+      - ./init:/docker-entrypoint-initdb.d:ro
+
+  replica1:
+    <<: *replica
+    container_name: pg-replica1
+    ports: ["127.0.0.1:5435:5432"]
+    environment: { UPSTREAM_HOST: primary, SLOT_NAME: replica1, REPL_PASSWORD: replpass }
+    volumes:
+      - r1:/var/lib/postgresql/data
+      - ./scripts:/scripts:ro
+    depends_on: { primary: { condition: service_healthy } }
+
+  replica2:
+    <<: *replica
+    container_name: pg-replica2
+    ports: ["127.0.0.1:5436:5432"]
+    environment: { UPSTREAM_HOST: primary, SLOT_NAME: replica2, REPL_PASSWORD: replpass }
+    volumes:
+      - r2:/var/lib/postgresql/data
+      - ./scripts:/scripts:ro
+    depends_on: { primary: { condition: service_healthy } }
+
+  # replica of a replica: streams WAL from replica1, not from the primary
+  cascade:
+    <<: *replica
+    container_name: pg-cascade
+    ports: ["127.0.0.1:5437:5432"]
+    environment: { UPSTREAM_HOST: replica1, SLOT_NAME: cascade, REPL_PASSWORD: replpass }
+    volumes:
+      - r3:/var/lib/postgresql/data
+      - ./scripts:/scripts:ro
+    depends_on: { replica1: { condition: service_healthy } }
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pg-bouncer
+    ports: ["127.0.0.1:6432:5432"]
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      replica1: { condition: service_healthy }
+      replica2: { condition: service_healthy }
+    networks: [pg]
+
+networks:
+  pg: {}
+
+volumes:
+  primary: {}
+  r1: {}
+  r2: {}
+  r3: {}

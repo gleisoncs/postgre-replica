@@ -1,0 +1,5 @@
+*.sh text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.ini text eol=lf
+replicas/pgbouncer/userlist.txt text eol=lf
